@@ -3,10 +3,22 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.Net.NetworkInformation;
 
 public class MyBot : IChessBot
 {
+    /*
+     * Token saving:
+     * use and pass lambdas with var type instead of function signature
+     *  var f = (...) => ... 
+     *  
+     *  implicit ctors everywhere
+     *      T thing = new();
+     *      
+     *  repeated consts
+     *      double.NegativeInfinity => double inf = double.NegativeInfinity
+     *      saves after enough uses
+     */
+
     static int[] weights = new int[]
     {
         0,   // None,   // 0
@@ -63,6 +75,7 @@ public class MyBot : IChessBot
             board.MakeMove(nextMove);
             try
             {
+                // 0.9 discount factor, near states are better than far states
                 value = Math.Max(value, 0.9 * -Negamax(board, depth - 1, -beta, -alpha, timer));
                 alpha = Math.Max(alpha, value);
 
@@ -90,13 +103,10 @@ public class MyBot : IChessBot
             .GetAllPieceLists()
             .SelectMany(pl => pl)
             .Select(p => weights[(int)p.PieceType] * Sign(p.IsWhite == board.IsWhiteToMove))
-            .Sum();
+            .Sum() + (Sign(board.IsInCheck()) * -500);
     }
 
     int Sign(bool white) => white ? 1 : -1;
 
     IEnumerable<Move> GetMoves(Board board) => board.GetLegalMoves().OrderBy(_ => rng.NextDouble());
-
-    // if we call enough times, this is a token saver?
-    //double Max(double a, double b) => Math.Max(a, b);
 }
