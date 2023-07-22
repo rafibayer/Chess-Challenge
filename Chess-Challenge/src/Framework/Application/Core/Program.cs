@@ -1,6 +1,7 @@
 ﻿using Raylib_cs;
 using System.IO;
 using System.Numerics;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 
 namespace ChessChallenge.Application
