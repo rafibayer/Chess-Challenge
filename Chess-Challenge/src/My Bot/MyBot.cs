@@ -18,26 +18,31 @@ public class MyBot : IChessBot
         0,   // King    // 6
     };
 
+    Random rng = new();
+
     public Move Think(Board board, Timer timer)
     {
-        // multiply score by sign so we are always maximizing here?
-        // makes logic branchless, saves tokens?
-        double value = double.NegativeInfinity;
-        Move best = Move.NullMove;
-        foreach (var move in board.GetLegalMoves()) 
-        { 
-            board.MakeMove(move);
-            double eval = Negamax(board, 5, double.NegativeInfinity, double.PositiveInfinity, timer);
-            if (eval > value)
+        Move bestMove = Move.NullMove;
+        double bestScore = double.NegativeInfinity;
+
+        string me = board.IsWhiteToMove ? "White" : "Black";
+
+        foreach (var nextMove in GetMoves(board))
+        {
+            board.MakeMove(nextMove);
+            double eval = Negamax(board, 4, double.NegativeInfinity, double.PositiveInfinity, Sign(board.IsWhiteToMove), timer);
+            if (eval > bestScore)
             {
-                value = eval;
-                best = move;
+                Console.WriteLine($"{me} found better move with score {eval}");
+                bestMove = nextMove;
+                bestScore = eval;
             }
 
-            board.UndoMove(move);
+            board.UndoMove(nextMove);
         }
 
-        return best;
+        Console.WriteLine("\n========");
+        return bestMove;
     }
 
     // https://en.wikipedia.org/wiki/Negamax#Negamax_with_alpha_beta_pruning
@@ -46,46 +51,52 @@ public class MyBot : IChessBot
         int depth,
         double alpha,
         double beta,
+        int color,
         Timer timer)
     {
-        // double check this, who is checkmaket here?
-        if (timer.MillisecondsElapsedThisTurn > 300 || board.IsInCheckmate())
-            return Evaluate(board);
+        if (board.IsInCheckmate() || board.IsDraw() || timer.MillisecondsElapsedThisTurn > 1000)
+            return color * Evaluate(board);
 
         double value = double.NegativeInfinity;
-        foreach (var nextMove in board.GetLegalMoves())
+        foreach (var nextMove in GetMoves(board))
         {
             board.MakeMove(nextMove);
-            value = Math.Max(value, -Negamax(board, depth-1, -beta, -alpha, timer));
-            alpha = Math.Max(alpha, value);
-            if (alpha >= beta)
+
+            try
+            {
+                value = Math.Max(value, -Negamax(board, depth - 1, -beta, -alpha, -color, timer));
+                alpha = Math.Max(alpha, value);
+
+                if (alpha >= beta)
+                {
+                    break;
+                }
+            }
+            finally
             {
                 board.UndoMove(nextMove);
-                break;
             }
-
-            board.UndoMove(nextMove);
         }
 
         return value;
     }
 
-    // white is maximizing:
-    // high score = good for white, low score = good for black
-    double Evaluate(Board board)
+    // relative to whos turn it is
+    public double Evaluate(Board board)
     {
         if (board.IsInCheckmate())
-            return 10000 * -Sign(board.IsWhiteToMove);
+            return 100000 * -Sign(board.IsWhiteToMove == board.IsWhiteToMove);
 
-        // material evaluation, sum of white piece values - sum of black piece values
         return board
             .GetAllPieceLists()
             .SelectMany(pl => pl)
-            .Select(p => values[(int)p.PieceType] * Sign(p.IsWhite))
+            .Select(p => values[(int)p.PieceType] * Sign(p.IsWhite == board.IsWhiteToMove))
             .Sum();
     }
 
     int Sign(bool white) => white ? 1 : -1;
+
+    IEnumerable<Move> GetMoves(Board board) => board.GetLegalMoves().OrderBy(_ => rng.NextDouble());
 
     // if we call enough times, this is a token saver?
     //double Max(double a, double b) => Math.Max(a, b);
