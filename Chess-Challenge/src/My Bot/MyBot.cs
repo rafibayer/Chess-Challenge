@@ -7,7 +7,7 @@ using System.Net.NetworkInformation;
 
 public class MyBot : IChessBot
 {
-    static int[] values = new int[]
+    static int[] weights = new int[]
     {
         0,   // None,   // 0
         100, // Pawn,   // 1
@@ -30,7 +30,8 @@ public class MyBot : IChessBot
         foreach (var nextMove in GetMoves(board))
         {
             board.MakeMove(nextMove);
-            double eval = Negamax(board, 4, double.NegativeInfinity, double.PositiveInfinity, Sign(board.IsWhiteToMove), timer);
+            // pick the move that is worst for the next player
+            double eval = -Negamax(board, 4, double.NegativeInfinity, double.PositiveInfinity, timer);
             if (eval > bestScore)
             {
                 Console.WriteLine($"{me} found better move with score {eval}");
@@ -51,20 +52,18 @@ public class MyBot : IChessBot
         int depth,
         double alpha,
         double beta,
-        int color,
         Timer timer)
     {
-        if (board.IsInCheckmate() || board.IsDraw() || timer.MillisecondsElapsedThisTurn > 1000)
-            return color * Evaluate(board);
+        if (depth == 0 || board.IsInCheckmate() || board.IsDraw() || timer.MillisecondsElapsedThisTurn > 1000)
+            return Evaluate(board);
 
         double value = double.NegativeInfinity;
         foreach (var nextMove in GetMoves(board))
         {
             board.MakeMove(nextMove);
-
             try
             {
-                value = Math.Max(value, -Negamax(board, depth - 1, -beta, -alpha, -color, timer));
+                value = Math.Max(value, 0.9 * -Negamax(board, depth - 1, -beta, -alpha, timer));
                 alpha = Math.Max(alpha, value);
 
                 if (alpha >= beta)
@@ -85,12 +84,12 @@ public class MyBot : IChessBot
     public double Evaluate(Board board)
     {
         if (board.IsInCheckmate())
-            return 100000 * -Sign(board.IsWhiteToMove == board.IsWhiteToMove);
+            return -10000;
 
         return board
             .GetAllPieceLists()
             .SelectMany(pl => pl)
-            .Select(p => values[(int)p.PieceType] * Sign(p.IsWhite == board.IsWhiteToMove))
+            .Select(p => weights[(int)p.PieceType] * Sign(p.IsWhite == board.IsWhiteToMove))
             .Sum();
     }
 
