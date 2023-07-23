@@ -10,7 +10,7 @@ namespace ChessChallenge.Application
     public class BoardUI
     {
         const int squareSize = 100;
-        const double moveAnimDuration = 0.0;
+        const double moveAnimDuration = 0.1;
         bool whitePerspective = true;
 
         // Text colours

@@ -24,7 +24,7 @@ public class MyBot : IChessBot
         0,   // None,   // 0
         100, // Pawn,   // 1
         300, // Knight, // 2
-        500, // Bishop, // 3
+        300, // Bishop, // 3
         500, // Rook,   // 4
         900, // Queen,  // 5
         0,   // King    // 6
@@ -33,39 +33,35 @@ public class MyBot : IChessBot
     Random rng = new();
     Timer turnTimer;
     
-    // zobrist, depth -> value, flag {-1 LOWER, 0 EXACT, 1 UPPER}
-    Dictionary<(ulong, int), (double, int)> transpositionTable = new();
+    // zobrist, depth -> value, flag {-1 LOWER, 0 EXACT, 1 UPPER}, Move
+    Dictionary<(ulong, int), (double, int, Move)> transpositionTable = new();
 
     public Move Think(Board board, Timer timer)
     {
-        Move bestMove = Move.NullMove;
-        double bestScore = double.NegativeInfinity;
-        string me = board.IsWhiteToMove ? "White" : "Black";
         turnTimer = timer;
 
-        for (int ply = 1; turnTimer.MillisecondsElapsedThisTurn < 500; ply++) 
+        Move bestMove = Move.NullMove;
+        double bestScore = double.NegativeInfinity;
+
+        // need to stop special casing root, we need a more
+        // elegant way to get the move associated with an evaluation
+        for (int ply = 1; turnTimer.MillisecondsElapsedThisTurn < 600; ply++) 
         {
-            foreach (var nextMove in GetMoves(board))
+            var (eval, move) = Negamax(board, ply, double.NegativeInfinity, double.PositiveInfinity);
+            if (eval > bestScore)
             {
-                board.MakeMove(nextMove);
-                // pick the move that is worst for the next player
-                double eval = -Negamax(board, ply, double.NegativeInfinity, double.PositiveInfinity);
-                if (eval >= bestScore)
-                {
-                    Console.WriteLine($"{me} found better move with score {eval} on ply {ply}");
-                    bestMove = nextMove;
-                    bestScore = eval;
-                }
-              
-                board.UndoMove(nextMove);
+                bestScore = eval;
+                bestMove = move;
+                Console.WriteLine($"{(board.IsWhiteToMove ? "White" : "Black")} found better move with score {bestScore} on ply {ply}");
             }
         }
+
         Console.WriteLine("\n========");
         return bestMove;
     }
 
     // https://en.wikipedia.org/wiki/Negamax#Negamax_with_alpha_beta_pruning_and_transposition_tables
-    double Negamax(
+    (double, Move) Negamax(
         Board board,
         int depth,
         double alpha,
@@ -75,30 +71,41 @@ public class MyBot : IChessBot
 
         if (transpositionTable.TryGetValue((board.ZobristKey, depth), out var ttEntry))
         {
-            switch (ttEntry.Item2) {
+            var (tteValue, tteFlag, tteMove) = ttEntry;
+            switch (tteFlag) {
                 case 0:
-                    return ttEntry.Item1;
+                    return (tteValue, tteMove);
                 case -1:
-                    alpha = Math.Max(alpha, ttEntry.Item1);
+                    alpha = Math.Max(alpha, tteValue);
                     break;
                 case 1:
-                    beta = Math.Max(beta, ttEntry.Item1);
+                    beta = Math.Max(beta, tteValue);
                     break;
             }
         }    
 
+        // we check time outside, this secondary check is just to short-circuit the ply
+        // if we started it just before running out of time. can be a bit longer that outer value
         if (depth == 0 || turnTimer.MillisecondsElapsedThisTurn > 750 || board.IsInCheckmate() || board.IsDraw())
-            return Evaluate(board);
+            return (Evaluate(board), Move.NullMove);
 
         double value = double.NegativeInfinity;
+        Move bestMove = Move.NullMove;
+
         foreach (var nextMove in GetMoves(board))
         {
             board.MakeMove(nextMove);
             try
             {
-                value = Math.Max(value, -Negamax(board, depth - 1, -beta, -alpha));
-                alpha = Math.Max(alpha, value);
+                var result = Negamax(board, depth - 1, -beta, -alpha);
+                var eval = -result.Item1;
+                if (eval > value)
+                {
+                    bestMove = nextMove;
+                    value = eval;
+                }
 
+                alpha = Math.Max(alpha, value);
                 if (alpha >= beta)
                 {
                     break;
@@ -116,9 +123,9 @@ public class MyBot : IChessBot
         else if (value >= beta)
             ttFlag = -1;
 
-        transpositionTable[(board.ZobristKey, depth)] = (value, ttFlag);
+        transpositionTable[(board.ZobristKey, depth)] = (value, ttFlag, bestMove);
 
-        return value;
+        return (value, bestMove);
     }
 
     // relative to whos turn it is, high = good, low = bad

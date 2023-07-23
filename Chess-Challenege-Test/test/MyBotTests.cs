@@ -33,9 +33,14 @@ namespace Chess_Challenge.test
             {
                 MyBot bot = new MyBot();
                 string takeQueenFEN = "k7/8/8/3q4/4Q3/8/8/7K w - - 0 1";
+
                 Board whiteToPlay = Board.CreateBoardFromFEN(takeQueenFEN);
                 Move best = bot.Think(whiteToPlay, Inf);
                 Assert.AreEqual(new Move("e4d5", whiteToPlay), best);
+
+                Board blackToPlay = Board.CreateBoardFromFEN(takeQueenFEN.Replace(" w ", " b "));
+                best = bot.Think(blackToPlay, Inf);
+                Assert.AreEqual(new Move("d5e4", whiteToPlay), best);
             });
         }
 
