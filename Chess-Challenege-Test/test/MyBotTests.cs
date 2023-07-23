@@ -11,7 +11,6 @@ namespace Chess_Challenge.test
     [TestClass]
     public class MyBotTests
     {
-
         ChessChallenge.API.Timer Inf => new ChessChallenge.API.Timer(int.MaxValue);
 
         [TestMethod]
@@ -42,10 +41,7 @@ namespace Chess_Challenge.test
 
         void Repeat(int n, Action f)
         {
-            for (int i = 0; i < n; i++)
-            {
-                f();
-            }
+            Parallel.For(0, n, (_) => f());
         }
     }
 }

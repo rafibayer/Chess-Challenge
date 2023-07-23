@@ -31,21 +31,20 @@ public class MyBot : IChessBot
     };
 
     Random rng = new();
+    Timer turnTimer;
     
-    // zobrist -> value, flag {-1 LOWER, 0 EXACT, 1 UPPER}
-    Dictionary<ulong, (double, int)> transpositionTable = new();
+    // zobrist, depth -> value, flag {-1 LOWER, 0 EXACT, 1 UPPER}
+    Dictionary<(ulong, int), (double, int)> transpositionTable = new();
 
     public Move Think(Board board, Timer timer)
     {
         Move bestMove = Move.NullMove;
         double bestScore = double.NegativeInfinity;
         string me = board.IsWhiteToMove ? "White" : "Black";
+        turnTimer = timer;
 
-        for (int ply = 1; timer.MillisecondsElapsedThisTurn < 500; ply++) 
+        for (int ply = 1; turnTimer.MillisecondsElapsedThisTurn < 500; ply++) 
         {
-            double bestScoreThisPly = double.NegativeInfinity;
-            Move bestMoveThisPly = Move.NullMove;
-
             foreach (var nextMove in GetMoves(board))
             {
                 board.MakeMove(nextMove);
@@ -57,17 +56,9 @@ public class MyBot : IChessBot
                     bestMove = nextMove;
                     bestScore = eval;
                 }
-
-                if (eval >= bestScoreThisPly)
-                {
-                    bestScoreThisPly = eval;
-                    bestMoveThisPly = nextMove;
-                }
-
+              
                 board.UndoMove(nextMove);
             }
-
-            Console.WriteLine($"best this ply: {bestMoveThisPly} for {bestScore} on ply {ply}");
         }
         Console.WriteLine("\n========");
         return bestMove;
@@ -82,7 +73,7 @@ public class MyBot : IChessBot
     {
         double originalAlpha = alpha;
 
-        if (transpositionTable.TryGetValue(board.ZobristKey, out var ttEntry))
+        if (transpositionTable.TryGetValue((board.ZobristKey, depth), out var ttEntry))
         {
             switch (ttEntry.Item2) {
                 case 0:
@@ -96,7 +87,7 @@ public class MyBot : IChessBot
             }
         }    
 
-        if (depth == 0 || board.IsInCheckmate() || board.IsDraw())
+        if (depth == 0 || turnTimer.MillisecondsElapsedThisTurn > 750 || board.IsInCheckmate() || board.IsDraw())
             return Evaluate(board);
 
         double value = double.NegativeInfinity;
@@ -125,7 +116,7 @@ public class MyBot : IChessBot
         else if (value >= beta)
             ttFlag = -1;
 
-        transpositionTable[board.ZobristKey] = (value, ttFlag);
+        transpositionTable[(board.ZobristKey, depth)] = (value, ttFlag);
 
         return value;
     }
@@ -135,7 +126,7 @@ public class MyBot : IChessBot
     {
         // checkmake is always back on your turn
         if (board.IsInCheckmate())
-            return -10000;
+            return -100000;
 
         // material advantage, penalty for being in check
         return board
