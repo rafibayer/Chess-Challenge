@@ -2,6 +2,7 @@
 using Raylib_cs;
 using System;
 using System.IO;
+using System.Linq;
 using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Threading;
@@ -21,6 +22,7 @@ namespace ChessChallenge.Application
         }
 
         // Game state
+        Random rng;
         int gameID;
         bool isPlaying;
         Board board;
@@ -58,6 +60,7 @@ namespace ChessChallenge.Application
             tokenCount = GetTokenCount();
             Warmer.Warm();
 
+            rng = new Random();
             moveGenerator = new();
             boardUI = new BoardUI();
             board = new Board();
@@ -65,7 +68,7 @@ namespace ChessChallenge.Application
 
             BotStatsA = new BotMatchStats("IBot");
             BotStatsB = new BotMatchStats("IBot");
-            botMatchStartFens = FileHelper.ReadResourceFile("Fens.txt").Split('\n');
+            botMatchStartFens = FileHelper.ReadResourceFile("Fens.txt").Split('\n').Where(fen => fen.Length > 0).ToArray();
             botTaskWaitHandle = new AutoResetEvent(false);
 
             StartNewGame(PlayerType.Human, PlayerType.MyBot);
@@ -75,7 +78,7 @@ namespace ChessChallenge.Application
         {
             // End any ongoing game
             EndGame(GameResult.DrawByArbiter, log: false, autoStartNextBotMatch: false);
-            gameID++;
+            gameID = rng.Next();
 
             // Stop prev task and create a new one
             if (RunBotsOnSeparateThread)
@@ -273,6 +276,7 @@ namespace ChessChallenge.Application
             {
                 isPlaying = false;
                 isWaitingToPlayMove = false;
+                gameID = -1;
 
                 if (log)
                 {
