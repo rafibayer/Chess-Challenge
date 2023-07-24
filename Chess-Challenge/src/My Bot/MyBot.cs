@@ -45,14 +45,14 @@ public class MyBot : IChessBot
 
         // need to stop special casing root, we need a more
         // elegant way to get the move associated with an evaluation
-        for (int ply = 1; turnTimer.MillisecondsElapsedThisTurn < 600; ply++) 
+        for (int ply = 2; turnTimer.MillisecondsElapsedThisTurn < 600; ply++) 
         {
             var (eval, move) = Negamax(board, ply, double.NegativeInfinity, double.PositiveInfinity);
             if (eval > bestScore)
             {
                 bestScore = eval;
                 bestMove = move;
-                Console.WriteLine($"{(board.IsWhiteToMove ? "White" : "Black")} found better move with score {bestScore} on ply {ply}");
+                Console.WriteLine($"{(board.IsWhiteToMove ? "White" : "Black")} found {bestMove} ~ {bestScore} on ply {ply}");
             }
         }
 
@@ -82,27 +82,28 @@ public class MyBot : IChessBot
                     beta = Math.Max(beta, tteValue);
                     break;
             }
-        }    
+        }
+
+        var moves = GetMoves(board);
 
         // we check time outside, this secondary check is just to short-circuit the ply
         // if we started it just before running out of time. can be a bit longer that outer value
         if (depth == 0 || turnTimer.MillisecondsElapsedThisTurn > 750 || board.IsInCheckmate() || board.IsDraw())
-            return (Evaluate(board), Move.NullMove);
+            return (Evaluate(board, moves), Move.NullMove);
 
         double value = double.NegativeInfinity;
         Move bestMove = Move.NullMove;
 
-        foreach (var nextMove in GetMoves(board))
+        foreach (var nextMove in moves)
         {
             board.MakeMove(nextMove);
             try
             {
-                var result = Negamax(board, depth - 1, -beta, -alpha);
-                var eval = -result.Item1;
-                if (eval > value)
+                var (eval, move) = Negamax(board, depth - 1, -beta, -alpha);
+                if (-eval > value)
                 {
                     bestMove = nextMove;
-                    value = eval;
+                    value = -eval;
                 }
 
                 alpha = Math.Max(alpha, value);
@@ -129,18 +130,48 @@ public class MyBot : IChessBot
     }
 
     // relative to whos turn it is, high = good, low = bad
-    public double Evaluate(Board board)
+    public double Evaluate(Board board, IEnumerable<Move> legalMoves)
     {
         // checkmake is always back on your turn
         if (board.IsInCheckmate())
             return -100000;
 
-        // material advantage, penalty for being in check
-        return board
+        if (board.IsDraw())
+            return 0;
+
+        int bonus = 0;
+
+        //// bonus for having lots of mobility, bonus for having > capture available
+        //bonus += legalMoves.Count() * 3;
+        //int captures = legalMoves.Count(m => m.IsCapture);
+        //if (captures > 1)
+        //    bonus += captures * 4;
+
+        var pieces = board
             .GetAllPieceLists()
-            .SelectMany(pl => pl)
+            .SelectMany(pl => pl);
+
+        //// penalty for own pieces threatened
+        //bonus += pieces
+        //    // piece color matches color of player, piece's square is attacked by opposing color
+        //    .Where(p => p.IsWhite == board.IsWhiteToMove && board.SquareIsAttackedByOpponent(p.Square))
+        //    // apply a penalty relative to piece weight
+        //    .Select(p => -weights[(int)p.PieceType] / 3)
+        //    .Sum();
+
+        //bonus += pieces
+        //    // piece color matches color of enemy, piece's square is attacked by opposing color (defended)
+        //    .Where(p => p.IsWhite != board.IsWhiteToMove && board.SquareIsAttackedByOpponent(p.Square))
+        //    // apply a penalty relative to piece weight
+        //    .Select(p => weights[(int)p.PieceType] / 5) // todo: this is fucked, we're giving a BONUS to you if enemy is defensive????
+        //    .Sum();
+
+        // todo: also penalize enemy pieces defended by enemy pieces
+
+        // material advantage
+        return pieces
             .Select(p => weights[(int)p.PieceType] * Sign(p.IsWhite == board.IsWhiteToMove))
-            .Sum() + (Sign(board.IsInCheck()) * -200);
+            .Sum() + bonus;
     }
 
     int Sign(bool white) => white ? 1 : -1;

@@ -20,10 +20,10 @@ namespace Chess_Challenge.test
             string whiteMaterialAdvantageFEN = "3k4/8/8/8/8/8/8/NNNNKNNN w - - 0 1";
 
             Board whiteToPlay = Board.CreateBoardFromFEN(whiteMaterialAdvantageFEN);
-            Assert.IsTrue(bot.Evaluate(whiteToPlay) > 0);
+            Assert.IsTrue(bot.Evaluate(whiteToPlay, whiteToPlay.GetLegalMoves()) > 0);
 
             Board blackToPlay = Board.CreateBoardFromFEN(whiteMaterialAdvantageFEN.Replace(" w ", " b "));
-            Assert.IsTrue(bot.Evaluate(blackToPlay) < 0);
+            Assert.IsTrue(bot.Evaluate(blackToPlay, blackToPlay.GetLegalMoves()) < 0);
         }
 
         [TestMethod]
