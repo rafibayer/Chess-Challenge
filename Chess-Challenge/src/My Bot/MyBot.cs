@@ -34,18 +34,24 @@ public class MyBot : IChessBot
     Timer turnTimer;
     
     // zobrist, depth -> value, flag {-1 LOWER, 0 EXACT, 1 UPPER}, Move
-    Dictionary<(ulong, int), (double, int, Move)> transpositionTable = new();
+    Dictionary<ulong, (double, int, Move)> transpositionTable = new();
+
+    Dictionary<(ulong, Move), double> moveScoreCache = new();
+
+    int cutoffs = 0;
 
     public Move Think(Board board, Timer timer)
     {
+        Console.WriteLine(board.GetFenString());
         turnTimer = timer;
+        //moveScoreCache.Clear();
 
         Move bestMove = Move.NullMove;
         double bestScore = double.NegativeInfinity;
 
         // need to stop special casing root, we need a more
         // elegant way to get the move associated with an evaluation
-        for (int ply = 2; turnTimer.MillisecondsElapsedThisTurn < 600; ply++) 
+        for (int ply = 2; turnTimer.MillisecondsElapsedThisTurn < 500; ply++) 
         {
             var (eval, move) = Negamax(board, ply, double.NegativeInfinity, double.PositiveInfinity);
             if (eval > bestScore)
@@ -56,7 +62,7 @@ public class MyBot : IChessBot
             }
         }
 
-        Console.WriteLine("\n========");
+        Console.WriteLine($"\n==== cutoffs {cutoffs} ====");
         return bestMove;
     }
 
@@ -68,30 +74,33 @@ public class MyBot : IChessBot
         double beta)
     {
         double originalAlpha = alpha;
+        ulong zobrist = board.ZobristKey;
 
-        if (transpositionTable.TryGetValue((board.ZobristKey, depth), out var ttEntry))
+        if (transpositionTable.TryGetValue(zobrist, out var ttEntry))
         {
             var (tteValue, tteFlag, tteMove) = ttEntry;
-            switch (tteFlag) {
+            switch (tteFlag)
+            {
                 case 0:
                     return (tteValue, tteMove);
                 case -1:
                     alpha = Math.Max(alpha, tteValue);
                     break;
                 case 1:
-                    beta = Math.Max(beta, tteValue);
+                    beta = Math.Min(beta, tteValue);
                     break;
             }
         }
 
-        var moves = GetMoves(board);
+        var moves = board.GetLegalMoves()
+            .OrderBy(m => moveScoreCache.TryGetValue((zobrist, m), out var cachedScore) ? -cachedScore : rng.NextDouble());
 
         // we check time outside, this secondary check is just to short-circuit the ply
         // if we started it just before running out of time. can be a bit longer that outer value
-        if (depth == 0 || turnTimer.MillisecondsElapsedThisTurn > 750 || board.IsInCheckmate() || board.IsDraw())
+        if (depth == 0 || turnTimer.MillisecondsElapsedThisTurn > 500 || board.IsInCheckmate() || board.IsDraw())
             return (Evaluate(board, moves), Move.NullMove);
 
-        double value = double.NegativeInfinity;
+        double bestScore = double.NegativeInfinity;
         Move bestMove = Move.NullMove;
 
         foreach (var nextMove in moves)
@@ -100,15 +109,20 @@ public class MyBot : IChessBot
             try
             {
                 var (eval, move) = Negamax(board, depth - 1, -beta, -alpha);
-                if (-eval > value)
+                eval = -eval;
+
+                if (eval > bestScore)
                 {
                     bestMove = nextMove;
-                    value = -eval;
+                    bestScore = eval;
                 }
 
-                alpha = Math.Max(alpha, value);
+                moveScoreCache[(zobrist, move)] = eval;
+
+                alpha = Math.Max(alpha, bestScore);
                 if (alpha >= beta)
                 {
+                    cutoffs++;
                     break;
                 }
             }
@@ -119,14 +133,14 @@ public class MyBot : IChessBot
         }
 
         int ttFlag = 0;
-        if (value <= originalAlpha)
+        if (bestScore <= originalAlpha)
             ttFlag = 1;
-        else if (value >= beta)
+        else if (bestScore >= beta)
             ttFlag = -1;
 
-        transpositionTable[(board.ZobristKey, depth)] = (value, ttFlag, bestMove);
+        transpositionTable[zobrist] = (bestScore, ttFlag, bestMove);
 
-        return (value, bestMove);
+        return (bestScore, bestMove);
     }
 
     // relative to whos turn it is, high = good, low = bad
@@ -169,12 +183,12 @@ public class MyBot : IChessBot
         // todo: also penalize enemy pieces defended by enemy pieces
 
         // material advantage
-        return pieces
+        var score = pieces
             .Select(p => weights[(int)p.PieceType] * Sign(p.IsWhite == board.IsWhiteToMove))
             .Sum() + bonus;
+
+        return score;
     }
 
     int Sign(bool white) => white ? 1 : -1;
-
-    IEnumerable<Move> GetMoves(Board board) => board.GetLegalMoves().OrderBy(_ => rng.NextDouble());
 }

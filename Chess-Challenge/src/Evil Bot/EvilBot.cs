@@ -67,7 +67,7 @@ public class EvilBot : IChessBot
         double beta,
         Timer timer)
     {
-        if (depth == 0 || board.IsInCheckmate() || board.IsDraw() || timer.MillisecondsElapsedThisTurn > 250)
+        if (depth == 0 || board.IsInCheckmate() || board.IsDraw() || timer.MillisecondsElapsedThisTurn > 500)
             return Evaluate(board);
 
         double value = double.NegativeInfinity;
