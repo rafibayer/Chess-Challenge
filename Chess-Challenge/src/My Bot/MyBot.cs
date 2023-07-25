@@ -156,10 +156,10 @@ public class MyBot : IChessBot
         int bonus = 0;
 
         //// bonus for having lots of mobility, bonus for having > capture available
-        //bonus += legalMoves.Count() * 3;
-        //int captures = legalMoves.Count(m => m.IsCapture);
-        //if (captures > 1)
-        //    bonus += captures * 4;
+        bonus += legalMoves.Count() * 3;
+        int captures = legalMoves.Count(m => m.IsCapture);
+        if (captures > 1)
+            bonus += captures * 4;
 
         var pieces = board
             .GetAllPieceLists()
