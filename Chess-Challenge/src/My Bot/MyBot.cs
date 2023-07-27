@@ -24,7 +24,7 @@ public class MyBot : IChessBot
         0,   // None,   // 0
         100, // Pawn,   // 1
         300, // Knight, // 2
-        300, // Bishop, // 3
+        320, // Bishop, // 3
         500, // Rook,   // 4
         900, // Queen,  // 5
         0,   // King    // 6
@@ -33,14 +33,21 @@ public class MyBot : IChessBot
     Random rng = new();
     Timer turnTimer;
 
-    struct TTEntry
+    enum Flag
+    {
+        LOWERBOUND,
+        EXACT,
+        UPPERBOUND,
+    }
+
+    record class TTEntry
     {
         public double value;
-        public int flag;
+        public Flag flag;
         public Move move;
         public int depth;
 
-        public TTEntry(double score, int flag, Move move, int depthToSearch)
+        public TTEntry(double score, Flag flag, Move move, int depthToSearch)
         {
             this.value = score;
             this.flag = flag;
@@ -52,33 +59,28 @@ public class MyBot : IChessBot
     // zobrist, depth -> value, flag {-1 LOWER, 0 EXACT, 1 UPPER}, Move, depth
     Dictionary<ulong, TTEntry> transpositionTable = new();
 
-    Dictionary<(ulong, Move), double> moveScoreCache = new();
+    Dictionary<ulong, (Move, double)> tree = new();
 
     int cutoffs = 0;
 
     public Move Think(Board board, Timer timer)
     {
-        Console.WriteLine(board.GetFenString());
         turnTimer = timer;
-        //moveScoreCache.Clear();
 
-        Move bestMove = Move.NullMove;
-        double bestScore = double.NegativeInfinity;
+        Move bestMove;
+        double bestScore;
 
-        // need to stop special casing root, we need a more
-        // elegant way to get the move associated with an evaluation
-        for (int ply = 2; turnTimer.MillisecondsElapsedThisTurn < 500; ply++)
+        int ply = 1;
+        do
         {
-            var (eval, move) = Negamax(board, ply, double.NegativeInfinity, double.PositiveInfinity);
-            if (eval > bestScore)
-            {
-                bestScore = eval;
-                bestMove = move;
-                Console.WriteLine($"{(board.IsWhiteToMove ? "White" : "Black")} found {bestMove} ~ {bestScore} on ply {ply}");
-            }
-        }
+            (bestScore, bestMove) = Negamax(board, ply, double.NegativeInfinity, double.PositiveInfinity);
+            ply++;
+        } 
+        while (turnTimer.MillisecondsElapsedThisTurn < 500);
 
+        Console.WriteLine($"{(board.IsWhiteToMove ? "White" : "Black")} found {bestMove} ~ {bestScore} on ply {ply}");
         Console.WriteLine($"\n==== cutoffs {cutoffs} ====");
+        //DbgTree(board);
         return bestMove;
     }
 
@@ -91,20 +93,21 @@ public class MyBot : IChessBot
     {
         double originalAlpha = alpha;
         ulong zobrist = board.ZobristKey;
+        Move? ttBestMove = null;
 
         if (transpositionTable.TryGetValue(zobrist, out var ttEntry))
         {
             if (ttEntry.depth >= depth)
             {
-                if (ttEntry.flag == 0)
+                if (ttEntry.flag == Flag.EXACT)
                 {
                     return (ttEntry.value, ttEntry.move);
                 }
-                else if (ttEntry.flag == -1)
+                else if (ttEntry.flag == Flag.LOWERBOUND)
                 {
                     alpha = Math.Max(alpha, ttEntry.value);
                 }
-                else if (ttEntry.flag == 1)
+                else if (ttEntry.flag == Flag.UPPERBOUND)
                 {
                     beta = Math.Min(beta, ttEntry.value);
                 }
@@ -114,16 +117,21 @@ public class MyBot : IChessBot
                     cutoffs++;
                     return (ttEntry.value, ttEntry.move);
                 }
+
+                ttBestMove = ttEntry.move;
             }
         }
 
-        var moves = board.GetLegalMoves()
-            .OrderBy(m => moveScoreCache.TryGetValue((zobrist, m), out var cachedScore) ? -cachedScore : rng.NextDouble());
-
+        // this probably has bad perf, what we're trying to do here is
+        // look at the TT move first by prepending it, but also not looking at it whihce
+        var moves = ttBestMove != null
+            ? new Move[] { ttBestMove.Value }.Concat(board.GetLegalMoves().Where(m => m != ttBestMove.Value))
+            : board.GetLegalMoves();
+        
         // we check time outside, this secondary check is just to short-circuit the ply
         // if we started it just before running out of time. can be a bit longer that outer value
-        if (depth == 0 || turnTimer.MillisecondsElapsedThisTurn > 600 || board.IsInCheckmate() || board.IsDraw())
-            return (Evaluate(board), Move.NullMove);
+        if (depth == 0 || moves.Count() == 0 || turnTimer.MillisecondsElapsedThisTurn > 500)
+            return (Evaluate(board, moves), Move.NullMove);
 
         double bestScore = double.NegativeInfinity;
         Move bestMove = Move.NullMove;
@@ -136,13 +144,11 @@ public class MyBot : IChessBot
                 var (eval, _) = Negamax(board, depth - 1, -beta, -alpha);
                 eval = -eval;
 
-                if (eval > bestScore)
+                if (eval >= bestScore)
                 {
                     bestMove = nextMove;
                     bestScore = eval;
                 }
-
-                moveScoreCache[(zobrist, nextMove)] = eval;
 
                 alpha = Math.Max(alpha, eval);
                 if (alpha >= beta)
@@ -157,21 +163,27 @@ public class MyBot : IChessBot
             }
         }
 
-        int ttFlag = 0;
+        Flag ttFlag;
         if (bestScore <= originalAlpha)
-            ttFlag = 1;
+        {
+            ttFlag = Flag.UPPERBOUND;
+        }
         else if (bestScore >= beta)
-            ttFlag = -1;
+        {
+            ttFlag = Flag.LOWERBOUND;
+        }
+        else
+        {
+            ttFlag = Flag.EXACT;
+        }
 
         transpositionTable[zobrist] = new TTEntry(bestScore, ttFlag, bestMove, depth);
-
         return (bestScore, bestMove);
     }
 
-    // relative to whos turn it is, high = good, low = bad
-    public double Evaluate(Board board)
+    // relative to whos turn
+    public double Evaluate(Board board, IEnumerable<Move> legalMoves)
     {
-        // checkmake is always back on your turn
         if (board.IsInCheckmate())
             return -100000;
 
@@ -180,11 +192,11 @@ public class MyBot : IChessBot
 
         int bonus = 0;
 
-        //// bonus for having lots of mobility, bonus for having > capture available
-        //bonus += legalMoves.Count() * 3;
-        //int captures = legalMoves.Count(m => m.IsCapture);
-        //if (captures > 1)
-        //    bonus += captures * 4;
+        // bonus for having lots of mobility, bonus for having > capture available
+        bonus += legalMoves.Count() * 1;
+        int captures = legalMoves.Count(m => m.IsCapture);
+        if (captures > 1)
+            bonus += captures * 1;
 
         var pieces = board
             .GetAllPieceLists()
@@ -213,6 +225,22 @@ public class MyBot : IChessBot
             .Sum() + bonus;
 
         return score;
+    }
+
+    void DbgTree(Board board, bool me = true, int depth = 0)
+    {
+        if (depth > 50) return;
+
+        if (tree.TryGetValue(board.ZobristKey, out var move))
+        {
+            Console.WriteLine($"{(me ? "me" : "you")} {move}");
+            board.MakeMove(move.Item1);
+            DbgTree(board, !me, depth + 1);
+            board.UndoMove(move.Item1);
+            return;
+        }
+
+        Console.WriteLine("end!");
     }
 
     int Sign(bool white) => white ? 1 : -1;

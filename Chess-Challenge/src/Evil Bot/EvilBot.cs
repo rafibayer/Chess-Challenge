@@ -43,7 +43,6 @@ public class EvilBot : IChessBot
 
     public Move Think(Board board, Timer timer)
     {
-        Console.WriteLine(board.GetFenString());
         turnTimer = timer;
         //moveScoreCache.Clear();
 
@@ -52,18 +51,19 @@ public class EvilBot : IChessBot
 
         // need to stop special casing root, we need a more
         // elegant way to get the move associated with an evaluation
-        for (int ply = 2; turnTimer.MillisecondsElapsedThisTurn < 500; ply++)
+        int ply;
+        for (ply = 2; turnTimer.MillisecondsElapsedThisTurn < 500; ply++)
         {
             var (eval, move) = Negamax(board, ply, double.NegativeInfinity, double.PositiveInfinity);
             if (eval > bestScore)
             {
                 bestScore = eval;
                 bestMove = move;
-                Console.WriteLine($"{(board.IsWhiteToMove ? "White" : "Black")} found {bestMove} ~ {bestScore} on ply {ply}");
             }
         }
 
-        Console.WriteLine($"\n==== cutoffs {cutoffs} ====");
+        Console.WriteLine($"{(board.IsWhiteToMove ? "White" : "Black")} found {bestMove} ~ {bestScore} on ply {ply} | cutoffs {cutoffs}");
+        Console.WriteLine($"\n========");
         return bestMove;
     }
 
