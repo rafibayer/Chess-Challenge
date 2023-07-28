@@ -13,6 +13,8 @@ namespace Chess_Challenge.test
     {
         ChessChallenge.API.Timer Inf => new ChessChallenge.API.Timer(int.MaxValue);
 
+        const string StartingFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
         [TestMethod]
         public void WhiteMaterialAdvantageTest()
         {
@@ -20,11 +22,10 @@ namespace Chess_Challenge.test
             string whiteMaterialAdvantageFEN = "3k4/8/8/8/8/8/8/NNNNKNNN w - - 0 1";
 
             Board whiteToPlay = Board.CreateBoardFromFEN(whiteMaterialAdvantageFEN);
-            Assert.IsTrue(bot.Evaluate(whiteToPlay) > 0);
+            Assert.IsTrue(bot.Evaluate(whiteToPlay, whiteToPlay.GetLegalMoves()) > 0);
 
-            // we're testing non-relative eval
-            //Board blackToPlay = Board.CreateBoardFromFEN(whiteMaterialAdvantageFEN.Replace(" w ", " b "));
-            //Assert.IsTrue(bot.Evaluate(blackToPlay) < 0);
+            Board blackToPlay = Board.CreateBoardFromFEN(whiteMaterialAdvantageFEN.Replace(" w ", " b "));
+            Assert.IsTrue(bot.Evaluate(blackToPlay, whiteToPlay.GetLegalMoves()) < 0);
         }
 
         [TestMethod]
@@ -44,6 +45,24 @@ namespace Chess_Challenge.test
                 Assert.AreEqual(new Move("d5e4", whiteToPlay), best);
             });
         }
+
+        [TestMethod]
+        public void EvaluateSymmetryTest()
+        {
+            MyBot bot = new MyBot();
+
+            string fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1\r\n";
+            Board board = Board.CreateBoardFromFEN(fen);
+
+            bot.Evaluate(board, board.GetLegalMoves());
+
+            string cur = board.IsWhiteToMove ? " w " : " b ";
+            string next = board.IsWhiteToMove ? " b " : " w ";
+
+            board = Board.CreateBoardFromFEN(fen.Replace(cur, next));
+            bot.Evaluate(board, board.GetLegalMoves());
+        }
+
 
         void Repeat(int n, Action f)
         {

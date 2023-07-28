@@ -18,21 +18,6 @@ public class MyBot : IChessBot
      *      double.NegativeInfinity => double inf = double.NegativeInfinity
      *      saves after enough uses
      */
-
-    int[] weights = new int[]
-    {
-        0,   // None,   // 0
-        100, // Pawn,   // 1
-        300, // Knight, // 2
-        320, // Bishop, // 3
-        500, // Rook,   // 4
-        900, // Queen,  // 5
-        0,   // King    // 6
-    };
-
-    Random rng = new();
-    Timer turnTimer;
-
     enum Flag
     {
         LOWERBOUND,
@@ -40,68 +25,96 @@ public class MyBot : IChessBot
         UPPERBOUND,
     }
 
-    record class TTEntry
+    struct TTEntry
     {
-        public double value;
+        public ulong zobrist;
+        public int value;
         public Flag flag;
         public Move move;
         public int depth;
 
-        public TTEntry(double score, Flag flag, Move move, int depthToSearch)
+        public TTEntry(ulong _zobrist, int _score, Flag _flag, Move _move, int _depth)
         {
-            this.value = score;
-            this.flag = flag;
-            this.move = move;
-            this.depth = depthToSearch;
+            zobrist = _zobrist;
+            value = _score;
+            flag = _flag;
+            move = _move;
+            depth = _depth;
         }
     }
 
-    // zobrist, depth -> value, flag {-1 LOWER, 0 EXACT, 1 UPPER}, Move, depth
-    Dictionary<ulong, TTEntry> transpositionTable = new();
+    int[] weights = new []
+    {
+        0,      // None,   // 0
+        100,    // Pawn,   // 1
+        300,    // Knight, // 2
+        320,    // Bishop, // 3
+        500,    // Rook,   // 4
+        900,    // Queen,  // 5
+        20000,  // King    // 6
+    };
 
-    Dictionary<ulong, (Move, double)> tree = new();
 
+    int CHECKMATE = 100000;
+
+    Random rng = new();
+
+    // zobrist % len ->  zobrist, value, flag {-1 LOWER, 0 EXACT, 1 UPPER}, Move, depth
+    const ulong TT_LEN = 10_000_000;
+    TTEntry[] transpositionTable = new TTEntry[TT_LEN];
+
+    // for stats only
     int cutoffs = 0;
 
-    public Move Think(Board board, Timer timer)
+    Timer timer;
+
+    public Move Think(Board board, Timer _timer)
     {
-        turnTimer = timer;
+        timer = _timer;
+        Move bestMove = Move.NullMove;
+        double bestScore = 0;
 
-        Move bestMove;
-        double bestScore;
-
-        int ply = 1;
-        do
+        int depth = 0;
+        for (; depth < 100; depth++)
         {
-            (bestScore, bestMove) = Negamax(board, ply, double.NegativeInfinity, double.PositiveInfinity);
-            ply++;
-        } 
-        while (turnTimer.MillisecondsElapsedThisTurn < 500);
+            bestScore = Negamax(board, depth, -CHECKMATE, CHECKMATE, out bestMove);
 
-        Console.WriteLine($"{(board.IsWhiteToMove ? "White" : "Black")} found {bestMove} ~ {bestScore} on ply {ply}");
+            // exit early if time timeout or checkmate found
+            // todo: dynamic timing based on time remaining at start of turn
+            if (timer.MillisecondsElapsedThisTurn > 500 || bestScore > CHECKMATE / 2)
+                break;
+        }
+
+        Console.WriteLine($"{(board.IsWhiteToMove ? "White" : "Black")} found {bestMove} ~ {bestScore} at {depth}");
         Console.WriteLine($"\n==== cutoffs {cutoffs} ====");
-        //DbgTree(board);
         return bestMove;
     }
 
     // https://en.wikipedia.org/wiki/Negamax#Negamax_with_alpha_beta_pruning_and_transposition_tables
-    (double, Move) Negamax(
+    int Negamax(
         Board board,
         int depth,
-        double alpha,
-        double beta)
+        int alpha,
+        int beta,
+        out Move bestMove)
     {
-        double originalAlpha = alpha;
+        int originalAlpha = alpha;
         ulong zobrist = board.ZobristKey;
-        Move? ttBestMove = null;
+        bestMove = Move.NullMove;
 
-        if (transpositionTable.TryGetValue(zobrist, out var ttEntry))
+        if (timer.MillisecondsElapsedThisTurn > 500)
+            return 0;
+
+        TTEntry ttEntry = transpositionTable[zobrist % TT_LEN];
+        Move ttEntryMove = Move.NullMove;
+        if (ttEntry.zobrist == zobrist)
         {
             if (ttEntry.depth >= depth)
             {
                 if (ttEntry.flag == Flag.EXACT)
                 {
-                    return (ttEntry.value, ttEntry.move);
+                    bestMove = ttEntry.move;
+                    return ttEntry.value;
                 }
                 else if (ttEntry.flag == Flag.LOWERBOUND)
                 {
@@ -115,51 +128,40 @@ public class MyBot : IChessBot
                 if (alpha >= beta)
                 {
                     cutoffs++;
-                    return (ttEntry.value, ttEntry.move);
+                    bestMove = ttEntry.move;
+                    return ttEntry.value;
                 }
 
-                ttBestMove = ttEntry.move;
+                ttEntryMove = ttEntry.move;
             }
         }
 
-        // this probably has bad perf, what we're trying to do here is
-        // look at the TT move first by prepending it, but also not looking at it whihce
-        var moves = ttBestMove != null
-            ? new Move[] { ttBestMove.Value }.Concat(board.GetLegalMoves().Where(m => m != ttBestMove.Value))
-            : board.GetLegalMoves();
-        
-        // we check time outside, this secondary check is just to short-circuit the ply
-        // if we started it just before running out of time. can be a bit longer that outer value
-        if (depth == 0 || moves.Count() == 0 || turnTimer.MillisecondsElapsedThisTurn > 500)
-            return (Evaluate(board, moves), Move.NullMove);
+        var moves = board.GetLegalMoves().OrderBy(m => ScoreMove(m, ttEntryMove));
+        int bestScore = -CHECKMATE;
 
-        double bestScore = double.NegativeInfinity;
-        Move bestMove = Move.NullMove;
-
-        foreach (var nextMove in moves)
+        if (depth == 0 || !moves.Any())
         {
-            board.MakeMove(nextMove);
-            try
+            return Evaluate(board, moves);
+        }
+
+        foreach (var move in moves)
+        {
+            board.MakeMove(move);
+
+            var eval = -Negamax(board, depth - 1, -beta, -alpha, out _);
+            board.UndoMove(move);
+
+            if (eval >= bestScore)
             {
-                var (eval, _) = Negamax(board, depth - 1, -beta, -alpha);
-                eval = -eval;
-
-                if (eval >= bestScore)
-                {
-                    bestMove = nextMove;
-                    bestScore = eval;
-                }
-
-                alpha = Math.Max(alpha, eval);
-                if (alpha >= beta)
-                {
-                    cutoffs++;
-                    break;
-                }
+                bestMove = move;
+                bestScore = eval;
             }
-            finally
+
+            alpha = Math.Max(alpha, eval);
+            if (alpha >= beta)
             {
-                board.UndoMove(nextMove);
+                cutoffs++;
+                break;
             }
         }
 
@@ -177,71 +179,46 @@ public class MyBot : IChessBot
             ttFlag = Flag.EXACT;
         }
 
-        transpositionTable[zobrist] = new TTEntry(bestScore, ttFlag, bestMove, depth);
-        return (bestScore, bestMove);
+        transpositionTable[zobrist % TT_LEN] = new TTEntry(zobrist, bestScore, ttFlag, bestMove, depth);
+        return bestScore;
     }
 
     // relative to whos turn
-    public double Evaluate(Board board, IEnumerable<Move> legalMoves)
+    public int Evaluate(Board board, IEnumerable<Move> legalMoves)
     {
         if (board.IsInCheckmate())
-            return -100000;
+            return -CHECKMATE;
 
         if (board.IsDraw())
-            return 0;
+            return -10;
 
-        int bonus = 0;
+        int score = 0;
 
-        // bonus for having lots of mobility, bonus for having > capture available
-        bonus += legalMoves.Count() * 1;
-        int captures = legalMoves.Count(m => m.IsCapture);
-        if (captures > 1)
-            bonus += captures * 1;
+        var pieces = board.GetAllPieceLists();
 
-        var pieces = board
-            .GetAllPieceLists()
-            .SelectMany(pl => pl);
-
-        //// penalty for own pieces threatened
-        //bonus += pieces
-        //    // piece color matches color of player, piece's square is attacked by opposing color
-        //    .Where(p => p.IsWhite == board.IsWhiteToMove && board.SquareIsAttackedByOpponent(p.Square))
-        //    // apply a penalty relative to piece weight
-        //    .Select(p => -weights[(int)p.PieceType] / 3)
-        //    .Sum();
-
-        //bonus += pieces
-        //    // piece color matches color of enemy, piece's square is attacked by opposing color (defended)
-        //    .Where(p => p.IsWhite != board.IsWhiteToMove && board.SquareIsAttackedByOpponent(p.Square))
-        //    // apply a penalty relative to piece weight
-        //    .Select(p => weights[(int)p.PieceType] / 5) // todo: this is fucked, we're giving a BONUS to you if enemy is defensive????
-        //    .Sum();
-
-        // todo: also penalize enemy pieces defended by enemy pieces
-
-        // material advantage
-        var score = pieces
-            .Select(p => weights[(int)p.PieceType] * Sign(p.IsWhite == board.IsWhiteToMove))
-            .Sum() + bonus;
-
+        // piece types
+        for (int i = 0; i < 6; i++)
+        {
+            score += weights[i+1] * (pieces[i].Count - pieces[i + 6].Count) * Sign(board.IsWhiteToMove);
+        }
+       
         return score;
     }
 
-    void DbgTree(Board board, bool me = true, int depth = 0)
+    int ScoreMove(Move move, Move ttEntryMove)
     {
-        if (depth > 50) return;
+        if (move == ttEntryMove)
+            return 100;
 
-        if (tree.TryGetValue(board.ZobristKey, out var move))
-        {
-            Console.WriteLine($"{(me ? "me" : "you")} {move}");
-            board.MakeMove(move.Item1);
-            DbgTree(board, !me, depth + 1);
-            board.UndoMove(move.Item1);
-            return;
-        }
+        // better to capture valuable pieces with less valuable pieces.
+        // todo: we don't need piece weight here? I guess higher piece index is always better weight,
+        // but it's not proportional at all
+        if (move.IsCapture)
+            return 10 * ((int)move.CapturePieceType) - (int)move.MovePieceType;
 
-        Console.WriteLine("end!");
+        return 0;
     }
+
 
     int Sign(bool white) => white ? 1 : -1;
 }
