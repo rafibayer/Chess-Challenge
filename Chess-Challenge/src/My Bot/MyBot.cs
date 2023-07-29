@@ -129,13 +129,28 @@ public class MyBot : IChessBot
         {
             ttEntryMove = ttEntry.move;
 
-            if (!root && ttEntry.depth >= depth 
-                && ((ttEntry.flag == Flag.LOWERBOUND && ttEntry.value <= alpha) 
-                    || ttEntry.flag == Flag.EXACT 
-                    || (ttEntry.flag == Flag.UPPERBOUND && ttEntry.value >= beta)))
+            if (ttEntry.depth >= depth)
             {
-                cutoffs++;
-                return ttEntry.value;
+                if (ttEntry.flag == Flag.EXACT)
+                {
+                    bestMove = ttEntryMove;
+                    return ttEntry.value;
+                }
+                else if (ttEntry.flag == Flag.LOWERBOUND)
+                {
+                    alpha = Math.Max(alpha, ttEntry.value);
+                }
+                else // upperbound
+                {
+                    beta = Math.Min(beta, ttEntry.value);
+                }
+
+
+                if (alpha >= beta)
+                {
+                    cutoffs++;
+                    return ttEntry.value;
+                }
             }
         }
 
@@ -171,11 +186,11 @@ public class MyBot : IChessBot
             }
         }
 
-        Flag flag = bestScore >= beta 
-            ? Flag.UPPERBOUND 
-            : bestScore > originalAlpha 
-                ? Flag.EXACT 
-                : Flag.LOWERBOUND;
+        Flag flag = bestScore <= originalAlpha
+            ? Flag.UPPERBOUND
+            : bestScore >= beta
+                ? Flag.LOWERBOUND
+                : Flag.EXACT;
 
         transpositionTable[zobrist % TT_LEN] = new TTEntry(zobrist, bestScore, flag, bestMove, depth);
         return bestScore;
