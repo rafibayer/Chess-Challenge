@@ -21,12 +21,13 @@ namespace Chess_Challenge_Runner
         {
             ConcurrentBag<GameResult> results = new();
 
-            Parallel.For(0, 5, (i) =>
+            Parallel.For(0, 100, (i) =>
             {
                 Console.WriteLine($"starting game {i}");
                 results.Add(PlayGame(() => new MyBot(), () => new EvilBot()));
                 Console.WriteLine($"finished game {i}");
             });
+           
 
             foreach (var result in results)
             {
@@ -45,14 +46,18 @@ namespace Chess_Challenge_Runner
             bool white = true;
 
             GameResult result = GameResult.InProgress;
+            int ply = 0;
             while (result == Chess.GameResult.InProgress)
             {
+                if (ply > 200)
+                    return GameResult.FiftyMoveRule;
                 var active = white ? playerA : playerB;
                 var move = active.Think(new (board), new(int.MaxValue));
-                board.MakeMove(new (move.RawValue));
+                board.MakeMove(new (move.RawValue), false);
 
                 white = !white;
                 result = Arbiter.GetGameState(board);
+                ply++;
             }
 
             return result;

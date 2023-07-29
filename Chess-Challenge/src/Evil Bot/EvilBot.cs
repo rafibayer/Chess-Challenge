@@ -52,7 +52,7 @@ public class EvilBot : IChessBot
         // need to stop special casing root, we need a more
         // elegant way to get the move associated with an evaluation
         int ply;
-        for (ply = 2; turnTimer.MillisecondsElapsedThisTurn < 500; ply++)
+        for (ply = 2; turnTimer.MillisecondsElapsedThisTurn < 250; ply++)
         {
             var (eval, move) = Negamax(board, ply, double.NegativeInfinity, double.PositiveInfinity);
             if (eval > bestScore)
@@ -98,7 +98,7 @@ public class EvilBot : IChessBot
 
         // we check time outside, this secondary check is just to short-circuit the ply
         // if we started it just before running out of time. can be a bit longer that outer value
-        if (depth == 0 || turnTimer.MillisecondsElapsedThisTurn > 500 || board.IsInCheckmate() || board.IsDraw())
+        if (depth == 0 || turnTimer.MillisecondsElapsedThisTurn > 250 || board.IsInCheckmate() || board.IsDraw())
             return (Evaluate(board, moves), Move.NullMove);
 
         double bestScore = double.NegativeInfinity;

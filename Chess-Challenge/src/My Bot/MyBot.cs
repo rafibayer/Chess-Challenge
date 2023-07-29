@@ -20,9 +20,9 @@ public class MyBot : IChessBot
      */
     enum Flag
     {
-        LOWERBOUND,
+        LOWERBOUND, // alpha flag
         EXACT,
-        UPPERBOUND,
+        UPPERBOUND, // beta flag
     }
 
     struct TTEntry
@@ -67,25 +67,36 @@ public class MyBot : IChessBot
     int cutoffs = 0;
 
     Timer timer;
+    int timeLimit;
 
     public Move Think(Board board, Timer _timer)
     {
         timer = _timer;
         Move bestMove = Move.NullMove;
-        double bestScore = 0;
+        int bestMoveScore = 0;
+        timeLimit = 250;
 
-        int depth = 0;
+        int depth = 1;
         for (; depth < 100; depth++)
         {
-            bestScore = Negamax(board, depth, -CHECKMATE, CHECKMATE, out bestMove);
+            int score = Negamax(board, depth, 0, -CHECKMATE, CHECKMATE, out var foundMove);
 
-            // exit early if time timeout or checkmate found
+            // exit early if time timeout
             // todo: dynamic timing based on time remaining at start of turn
-            if (timer.MillisecondsElapsedThisTurn > 500 || bestScore > CHECKMATE / 2)
+            if (timer.MillisecondsElapsedThisTurn > timeLimit)
                 break;
+
+            // we only update the best move if we completed the search at that ply without timing out
+            bestMove = foundMove;
+            bestMoveScore = score;
+
+            // exit early if we found a checkmake
+            if (score > CHECKMATE / 2)
+                break;
+
         }
 
-        Console.WriteLine($"{(board.IsWhiteToMove ? "White" : "Black")} found {bestMove} ~ {bestScore} at {depth}");
+        Console.WriteLine($"{(board.IsWhiteToMove ? "White" : "Black")} found {bestMove} ~ {bestMoveScore} at {depth}");
         Console.WriteLine($"\n==== cutoffs {cutoffs} ====");
         return bestMove;
     }
@@ -94,6 +105,7 @@ public class MyBot : IChessBot
     int Negamax(
         Board board,
         int depth,
+        int ply,
         int alpha,
         int beta,
         out Move bestMove)
@@ -101,54 +113,48 @@ public class MyBot : IChessBot
         int originalAlpha = alpha;
         ulong zobrist = board.ZobristKey;
         bestMove = Move.NullMove;
+        int bestScore = -CHECKMATE;
+        bool root = ply == 0;
 
-        if (timer.MillisecondsElapsedThisTurn > 500)
+        if (timer.MillisecondsElapsedThisTurn > timeLimit)
             return 0;
 
-        TTEntry ttEntry = transpositionTable[zobrist % TT_LEN];
+        // discourage draw by repitition
+        if (!root && board.IsRepeatedPosition())
+            return -20;  
+
         Move ttEntryMove = Move.NullMove;
+        TTEntry ttEntry = transpositionTable[zobrist % TT_LEN];
         if (ttEntry.zobrist == zobrist)
         {
-            if (ttEntry.depth >= depth)
+            ttEntryMove = ttEntry.move;
+
+            if (!root && ttEntry.depth >= depth 
+                && ((ttEntry.flag == Flag.LOWERBOUND && ttEntry.value <= alpha) 
+                    || ttEntry.flag == Flag.EXACT 
+                    || (ttEntry.flag == Flag.UPPERBOUND && ttEntry.value >= beta)))
             {
-                if (ttEntry.flag == Flag.EXACT)
-                {
-                    bestMove = ttEntry.move;
-                    return ttEntry.value;
-                }
-                else if (ttEntry.flag == Flag.LOWERBOUND)
-                {
-                    alpha = Math.Max(alpha, ttEntry.value);
-                }
-                else if (ttEntry.flag == Flag.UPPERBOUND)
-                {
-                    beta = Math.Min(beta, ttEntry.value);
-                }
-
-                if (alpha >= beta)
-                {
-                    cutoffs++;
-                    bestMove = ttEntry.move;
-                    return ttEntry.value;
-                }
-
-                ttEntryMove = ttEntry.move;
+                cutoffs++;
+                return ttEntry.value;
             }
         }
 
-        var moves = board.GetLegalMoves().OrderBy(m => ScoreMove(m, ttEntryMove));
-        int bestScore = -CHECKMATE;
+        // negate score for descending order
+        var moves = board.GetLegalMoves().OrderBy(m => -ScoreMove(m, ttEntryMove));
 
-        if (depth == 0 || !moves.Any())
-        {
-            return Evaluate(board, moves);
-        }
+        // discourage getting mated, add ply to prefer
+        // getting mated later to give more chances to recover
+        if (!moves.Any())
+            return board.IsInCheck() ? -CHECKMATE + ply : 0;
+
+        if (depth == 0)
+            return Evaluate(board);
 
         foreach (var move in moves)
         {
             board.MakeMove(move);
 
-            var eval = -Negamax(board, depth - 1, -beta, -alpha, out _);
+            var eval = -Negamax(board, depth - 1, ply + 1, -beta, -alpha, out _);
             board.UndoMove(move);
 
             if (eval >= bestScore)
@@ -165,46 +171,32 @@ public class MyBot : IChessBot
             }
         }
 
-        Flag ttFlag;
-        if (bestScore <= originalAlpha)
-        {
-            ttFlag = Flag.UPPERBOUND;
-        }
-        else if (bestScore >= beta)
-        {
-            ttFlag = Flag.LOWERBOUND;
-        }
-        else
-        {
-            ttFlag = Flag.EXACT;
-        }
+        Flag flag = bestScore >= beta 
+            ? Flag.UPPERBOUND 
+            : bestScore > originalAlpha 
+                ? Flag.EXACT 
+                : Flag.LOWERBOUND;
 
-        transpositionTable[zobrist % TT_LEN] = new TTEntry(zobrist, bestScore, ttFlag, bestMove, depth);
+        transpositionTable[zobrist % TT_LEN] = new TTEntry(zobrist, bestScore, flag, bestMove, depth);
         return bestScore;
     }
 
     // relative to whos turn
-    public int Evaluate(Board board, IEnumerable<Move> legalMoves)
+    public int Evaluate(Board board)
     {
-        if (board.IsInCheckmate())
-            return -CHECKMATE;
-
-        if (board.IsDraw())
-            return -10;
-
-        int score = 0;
-
-        var pieces = board.GetAllPieceLists();
-
-        // piece types
-        for (int i = 0; i < 6; i++)
-        {
-            score += weights[i+1] * (pieces[i].Count - pieces[i + 6].Count) * Sign(board.IsWhiteToMove);
-        }
-       
-        return score;
+        int materialValue = 0;
+        int mobilityValue = board.GetLegalMoves().Length;
+        int captureValue = board.GetLegalMoves(true).Length;
+        
+        for (int i = 1; i <= 6; i++)
+            materialValue += (board.GetPieceList((PieceType)i, true).Count - board.GetPieceList((PieceType)i, false).Count) * weights[i];
+        
+        // multiply the material value by the sign of the player,
+        // negative score but black player = positive score
+        return (materialValue * Sign(board.IsWhiteToMove)) + mobilityValue + captureValue;
     }
 
+    // https://www.chessprogramming.org/MVV-LVA
     int ScoreMove(Move move, Move ttEntryMove)
     {
         if (move == ttEntryMove)
